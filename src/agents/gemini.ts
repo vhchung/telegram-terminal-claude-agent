@@ -1,87 +1,65 @@
 /**
- * Gemini Agent - LLM orchestrator using Google Generative AI
+ * Gemini Agent - LLM orchestrator using Google Gen AI SDK
  * Analyzes user intent and determines which tool to use
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import type { ToolCall } from '../types/index.js';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 
-// Tool definitions for Gemini
-const TOOLS = [
-  {
-    name: 'execute_shell',
-    description:
-      'Execute a shell command for lightweight, non-destructive operations such as checking git status, listing files (ls), showing current directory (pwd), or viewing system information. Use this for read-only commands that provide quick information.',
-    parameters: {
-      type: 'object',
-      properties: {
-        command: {
-          type: 'string',
-          description: 'The shell command to execute (e.g., "git status", "ls -la", "pwd")',
-        },
-      },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'propose_claude_action',
-    description:
-      'Propose an action to be executed by Claude Code CLI. Use this for any task involving code editing, refactoring, file modifications, or complex multi-step coding operations. You MUST optimize the user\'s casual request into a professional, clear, and context-rich instruction for the Claude CLI. Do not ask for confirmation yourself; the system handles the UI approval flow.',
-    parameters: {
-      type: 'object',
-      properties: {
-        optimized_prompt: {
-          type: 'string',
-          description:
-            'A technically dense, professionally rewritten prompt specifically for the Claude CLI. Include specific files, context, and technical details needed for the task.',
-        },
-      },
-      required: ['optimized_prompt'],
-    },
-  },
-];
-
 // System prompt for the orchestrator
-const SYSTEM_PROMPT = `You are a Terminal Orchestrator. Your goal is to help a developer manage their machine via Telegram.
+const SYSTEM_INSTRUCTION = `You are a Terminal Orchestrator. Your goal is to help a developer manage their machine via Telegram.
 
 Your capabilities:
 1. **execute_shell**: For lightweight, non-destructive commands like checking status (git, files, system). Examples:
-   - "git status" → execute_shell with "git status"
-   - "list files" → execute_shell with "ls -la"
-   - "what's in this directory" → execute_shell with "ls -la"
-   - "current branch" → execute_shell with "git branch"
+   - "git status" → execute_shell
+   - "list files" → execute_shell
+   - "what's in this directory" → execute_shell
+   - "current branch" → execute_shell
 
-2. **propose_claude_action**: For any task involving code editing, refactoring, or complex multi-step CLI operations. Examples:
-   - "Refactor auth" → propose_claude_action with optimized prompt
-   - "Add error handling" → propose_claude_action with optimized prompt
-   - "Create a new component" → propose_claude_action with optimized prompt
-   - "Fix the bug in the API" → propose_claude_action with optimized prompt
+2. **propose_claude_action**: For any task involving code editing, refactoring, file modifications, or complex multi-step operations. Examples:
+   - "Refactor auth" → propose_claude_action
+   - "Add error handling" → propose_claude_action
+   - "Create a new component" → propose_claude_action
+   - "Fix the bug in the API" → propose_claude_action
+   - "Update README" → propose_claude_action
+   
+**How to choose the right tool:**
+- For simple, non-destructive commands, use execute_shell
+- For code editing, refactoring, or complex operations related to code, use propose_claude_action
 
-**Important Rules:**
-- When using propose_claude_action, you MUST optimize the user's casual request into a professional, clear, and context-rich instruction for the Claude CLI.
-- Include specific file paths, function names, and technical details if mentioned or can be inferred.
-- Make prompts technically dense and precise for Claude CLI.
-- Do NOT ask for confirmation yourself; the system handles the UI button.
-- If the user's intent is unclear, ask for clarification using execute_shell to gather information first.
+**Important Rules For propose_claude_action:**
+- Do NOT try to optimize or rewrite the user's request
+- The user's original message will be passed directly to the tool
 
-**Prompt Optimization Examples:**
-- User: "Refactor auth" → Optimized: "Refactor src/auth.ts to implement cookie-based authentication, replacing the current localStorage logic. Ensure CSRF protection is included and maintain backward compatibility."
-- User: "Fix the login bug" → Optimized: "Investigate and fix the authentication bug in src/components/Login.tsx. The issue appears to be with token validation after form submission. Add proper error handling and user feedback."
-- User: "Add types" → Optimized: "Add TypeScript type annotations to src/utils/helpers.ts. Create proper interfaces for function parameters and return types. Enable strict type checking."`;
+**Response Format:**
+You must respond with a JSON object ONLY. No additional text.
+
+For execute_shell:
+{
+  "tool": "execute_shell",
+  "reasoning": "User wants to check git status"
+}
+
+For propose_claude_action:
+{
+  "tool": "propose_claude_action",
+  "reasoning": "This requires code editing"
+}
+
+For conversational response:
+{
+  "tool": null,
+  "reasoning": "Your conversational response here"
+}`;
 
 export class GeminiAgent {
-  private genAI: GoogleGenerativeAI;
-  private model: any;
+  private ai: GoogleGenAI;
 
   constructor() {
-    this.genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    this.model = this.genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash-exp-thinking-cache',
-      systemInstruction: SYSTEM_PROMPT,
-      tools: [{ functionDeclarations: TOOLS as any }],
-    });
+    this.ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+    logger.debug(`Initialized Google Gen AI SDK with model: ${config.geminiModel}`);
   }
 
   /**
@@ -100,63 +78,100 @@ Analyze this request and determine the appropriate action. Consider:
 - Is this a simple status check or read-only command? → execute_shell
 - Is this a code editing, refactoring, or complex task? → propose_claude_action
 
-Provide your tool call recommendation.`;
+IMPORTANT: You must respond with a valid JSON object. Do not include any text before or after the JSON.
 
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const functionCall = response.functionCalls();
+Example format:
+{
+  "tool": "execute_shell",
+  "args": {"command": "ls -la"},
+  "reasoning": "User wants to list files"
+}
 
-      if (functionCall && functionCall.length > 0) {
-        const call = functionCall[0];
-        const toolCall: ToolCall = {
-          name: call.name as ToolCall['name'],
-          args: call.args,
-        };
+Or for conversational response:
+{
+  "tool": null,
+  "reasoning": "Your response here"
+}
 
-        logger.debug(`Tool selected: ${toolCall.name}`);
+Now analyze and respond with JSON only:`;
 
+      const result = await this.ai.models.generateContent({
+        model: config.geminiModel,
+        contents: prompt
+      });
+
+      const text = result.text?.trim() || '';
+      logger.debug(`Raw Gemini response: ${text.substring(0, 200)}`);
+
+      // Try to extract JSON from the response
+      let jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/) ||
+                      text.match(/```\n?([\s\S]*?)\n?```/) ||
+                      text.match(/\{[\s\S]*\}/);
+
+      if (!jsonMatch) {
+        // No JSON found - treat as conversational response
+        logger.debug('No JSON found in response, treating as conversational');
         return {
-          toolCall,
-          reasoning: response.text() || '',
+          toolCall: null,
+          reasoning: text,
         };
       }
 
-      // No tool call - return text response
-      return {
-        toolCall: null,
-        reasoning: response.text() || 'No tool selected',
-      };
-    } catch (error) {
+      const jsonStr = jsonMatch[1] || jsonMatch[0];
+
+      try {
+        const parsed = JSON.parse(jsonStr);
+        logger.debug(`Parsed JSON: tool=${parsed.tool}`);
+
+        // Validate and create tool call with args from AI response
+        if (parsed.tool && (parsed.tool === 'execute_shell' || parsed.tool === 'propose_claude_action')) {
+          const toolCall: ToolCall = {
+            name: parsed.tool,
+            args: parsed.args || {}, // Use args from AI response
+          };
+
+          logger.debug(`Tool selected: ${toolCall.name}`);
+
+          return {
+            toolCall,
+            reasoning: parsed.reasoning || '',
+          };
+        }
+
+        // No valid tool call - return conversational response
+        return {
+          toolCall: null,
+          reasoning: parsed.reasoning || text,
+        };
+      } catch (parseError: any) {
+        logger.error('JSON parse error:', parseError.message);
+        // If JSON parsing fails, return the raw text as conversational
+        return {
+          toolCall: null,
+          reasoning: text,
+        };
+      }
+    } catch (error: any) {
       logger.error('Error analyzing message:', error);
-      return {
-        toolCall: null,
-        reasoning: 'Sorry, I encountered an error analyzing your request.',
-      };
-    }
-  }
 
-  /**
-   * Generate an optimized prompt for Claude CLI
-   */
-  async optimizePrompt(userRequest: string): Promise<string> {
-    try {
-      const prompt = `Optimize this user request for the Claude CLI. Make it technical, precise, and context-rich.
+      // Try to extract reasoning from error response
+      try {
+        const result = await this.ai.models.generateContent({
+          model: config.geminiModel,
+          contents: `User message: "${userMessage}"\n\nProvide a helpful conversational response. Do not use any tools.`
+        });
 
-User request: "${userRequest}"
-
-Create a professional prompt that Claude Code can execute effectively. Include specific files, commands, or technical context if relevant.`;
-
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const optimized = response.text().trim();
-
-      logger.debug(`Optimized prompt: ${optimized}`);
-
-      return optimized;
-    } catch (error) {
-      logger.error('Error optimizing prompt:', error);
-      // Return original request if optimization fails
-      return userRequest;
+        return {
+          toolCall: null,
+          reasoning: result.text || 'Sorry, I encountered an error analyzing your request.',
+        };
+      } catch (fallbackError) {
+        logger.error('Fallback also failed:', fallbackError);
+        return {
+          toolCall: null,
+          reasoning: 'Sorry, I encountered an error analyzing your request.',
+        };
+      }
     }
   }
 
@@ -165,9 +180,11 @@ Create a professional prompt that Claude Code can execute effectively. Include s
    */
   async generateResponse(userMessage: string): Promise<string> {
     try {
-      const result = await this.model.generateContent(userMessage);
-      const response = await result.response;
-      return response.text();
+      const result = await this.ai.models.generateContent({
+        model: config.geminiModel,
+        contents: userMessage
+      });
+      return result.text || 'Sorry, I could not generate a response.';
     } catch (error) {
       logger.error('Error generating response:', error);
       return 'Sorry, I encountered an error generating a response.';

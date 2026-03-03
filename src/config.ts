@@ -7,7 +7,9 @@ import { $ } from 'bun';
 interface Config {
   telegramToken: string;
   geminiApiKey: string;
+  geminiModel: string;
   adminId: number;
+  adminUsername: string;
   claudeCliPath: string;
   workingDir: string;
 }
@@ -35,7 +37,9 @@ function getEnvNumber(key: string): number {
 export const config: Config = {
   telegramToken: getEnvVar('TELEGRAM_TOKEN'),
   geminiApiKey: getEnvVar('GEMINI_API_KEY'),
-  adminId: getEnvNumber('ADMIN_ID'),
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  adminId: 0, // Will be set from ADMIN_ID or default to 0
+  adminUsername: process.env.ADMIN_USERNAME || '',
   claudeCliPath: process.env.CLAUDE_CLI_PATH || 'claude',
   workingDir: process.cwd(), // Temporary value, will be updated in validateConfig
 };
@@ -68,7 +72,28 @@ export async function validateConfig(): Promise<void> {
     // Validate required environment variables
     getEnvVar('TELEGRAM_TOKEN');
     getEnvVar('GEMINI_API_KEY');
-    getEnvNumber('ADMIN_ID');
+
+    // Debug: Log environment variables
+    console.log('DEBUG: GEMINI_MODEL from env =', process.env.GEMINI_MODEL);
+
+    // Validate admin authentication method
+    const adminId = process.env.ADMIN_ID;
+    const adminUsername = process.env.ADMIN_USERNAME;
+
+    if (!adminId && !adminUsername) {
+      throw new Error('Missing required authentication: Set either ADMIN_ID (numeric) or ADMIN_USERNAME (string without @)');
+    }
+
+    if (adminId) {
+      (config as any).adminId = parseInt(adminId, 10);
+      if (isNaN((config as any).adminId)) {
+        throw new Error('ADMIN_ID must be a valid number');
+      }
+      console.log(`✓ Admin authentication: User ID (${(config as any).adminId})`);
+    } else {
+      console.log(`✓ Admin authentication: Username (@${config.adminUsername})`);
+      console.log(`  Note: User ID will be captured on first message`);
+    }
 
     // Resolve and validate working directory
     const workingDirSetting = process.env.WORKING_DIR || process.cwd();
@@ -78,6 +103,7 @@ export async function validateConfig(): Promise<void> {
     (config as any).workingDir = resolvedDir;
 
     console.log('✓ Configuration validated successfully');
+    console.log(`✓ Gemini Model: ${config.geminiModel}`);
     console.log(`✓ Working directory: ${resolvedDir}`);
   } catch (error) {
     console.error('✗ Configuration validation failed:', error);

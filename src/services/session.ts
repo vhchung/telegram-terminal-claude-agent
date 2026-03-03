@@ -4,6 +4,7 @@
  */
 
 import type { SessionState, PendingClaudeAction } from '../types/index.js';
+import { logger } from '../utils/logger.js';
 
 class SessionManager {
   private sessions: Map<number, SessionState> = new Map();
@@ -73,6 +74,105 @@ class SessionManager {
   clearCurrentProcess(chatId: number): void {
     const session = this.getSession(chatId);
     delete session.currentProcess;
+  }
+
+  /**
+   * Enter terminal session mode
+   */
+  enterTerminalSession(chatId: number): void {
+    const session = this.getSession(chatId);
+    session.isInTerminalSession = true;
+    session.terminalSessionStartTime = Date.now();
+    session.conversationHistory = [];
+    logger.info(`[${chatId}] Entered terminal session mode`);
+  }
+
+  /**
+   * Exit terminal session mode
+   */
+  exitTerminalSession(chatId: number): void {
+    const session = this.getSession(chatId);
+    session.isInTerminalSession = false;
+    delete session.terminalSessionStartTime;
+    delete session.conversationHistory;
+    delete session.pendingClaudeQuestion;
+    logger.info(`[${chatId}] Exited terminal session mode`);
+  }
+
+  /**
+   * Check if chat is in terminal session mode
+   */
+  isInTerminalSession(chatId: number): boolean {
+    const session = this.getSession(chatId);
+    return !!session.isInTerminalSession;
+  }
+
+  /**
+   * Add message to conversation history
+   */
+  addToConversationHistory(chatId: number, message: string): void {
+    const session = this.getSession(chatId);
+    if (!session.conversationHistory) {
+      session.conversationHistory = [];
+    }
+    session.conversationHistory.push(message);
+    
+    // Keep only last 20 messages to avoid memory issues
+    if (session.conversationHistory.length > 20) {
+      session.conversationHistory = session.conversationHistory.slice(-20);
+    }
+  }
+
+  /**
+   * Get conversation history
+   */
+  getConversationHistory(chatId: number): string[] {
+    const session = this.getSession(chatId);
+    return session.conversationHistory || [];
+  }
+
+  /**
+   * Set pending Claude question (waiting for user response)
+   */
+  setPendingClaudeQuestion(
+    chatId: number,
+    question: string,
+    options?: Array<{ label: string; value: string }>
+  ): void {
+    const session = this.getSession(chatId);
+    session.pendingClaudeQuestion = {
+      question,
+      options,
+      timestamp: Date.now(),
+    };
+  }
+
+  /**
+   * Get pending Claude question
+   */
+  getPendingClaudeQuestion(chatId: number): {
+    question: string;
+    options?: Array<{ label: string; value: string }>;
+    timestamp: number;
+  } | undefined {
+    const session = this.getSession(chatId);
+    return session.pendingClaudeQuestion;
+  }
+
+  /**
+   * Clear pending Claude question
+   */
+  clearPendingClaudeQuestion(chatId: number): void {
+    const session = this.getSession(chatId);
+    delete session.pendingClaudeQuestion;
+  }
+
+  /**
+   * Check if there's a pending question from Claude
+   */
+  hasPendingClaudeQuestion(chatId: number): boolean {
+    const session = this.getSession(chatId);
+    return !!session.pendingClaudeQuestion;
   }
 
   /**

@@ -18,13 +18,19 @@ export async function executeClaudePrompt(
   const startTime = Date.now();
 
   try {
-    // Spawn the Claude CLI process in the working directory
+    // Use --print flag for non-interactive execution
+    // Use --permission-mode acceptEdits to allow Claude to make changes without asking
+    // This allows Claude to complete its full tool-use cycle and actually write files
     const proc = spawn({
-      cmd: [config.claudeCliPath, prompt],
+      cmd: [
+        config.claudeCliPath,
+        '--print',
+        '--permission-mode', 'acceptEdits',
+        prompt
+      ],
       cwd: config.workingDir,
       stdout: 'pipe',
       stderr: 'pipe',
-      stdin: 'inherit',
     });
 
     // Set up timeout

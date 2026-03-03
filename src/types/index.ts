@@ -41,4 +41,15 @@ export interface SessionState {
     type: 'shell' | 'claude';
     startTime: number;
   };
+  // Terminal session mode
+  isInTerminalSession?: boolean;
+  terminalSessionStartTime?: number;
+  // For conversation history in terminal mode
+  conversationHistory?: string[];
+  // Pending question from Claude (waiting for user response)
+  pendingClaudeQuestion?: {
+    question: string;
+    options?: Array<{ label: string; value: string }>;
+    timestamp: number;
+  };
 }
