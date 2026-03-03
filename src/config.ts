@@ -6,8 +6,11 @@ import { $ } from 'bun';
 
 interface Config {
   telegramToken: string;
+  provider: 'gemini' | 'groq';
   geminiApiKey: string;
   geminiModel: string;
+  groqApiKey: string;
+  groqModel: string;
   adminId: number;
   adminUsername: string;
   claudeCliPath: string;
@@ -36,8 +39,11 @@ function getEnvNumber(key: string): number {
 
 export const config: Config = {
   telegramToken: getEnvVar('TELEGRAM_TOKEN'),
-  geminiApiKey: getEnvVar('GEMINI_API_KEY'),
+  provider: (process.env.PROVIDER as 'gemini' | 'groq') || 'gemini',
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  groqApiKey: process.env.GROQ_API_KEY || '',
+  groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
   adminId: 0, // Will be set from ADMIN_ID or default to 0
   adminUsername: process.env.ADMIN_USERNAME || '',
   claudeCliPath: process.env.CLAUDE_CLI_PATH || 'claude',
@@ -71,10 +77,28 @@ export async function validateConfig(): Promise<void> {
   try {
     // Validate required environment variables
     getEnvVar('TELEGRAM_TOKEN');
-    getEnvVar('GEMINI_API_KEY');
 
-    // Debug: Log environment variables
-    console.log('DEBUG: GEMINI_MODEL from env =', process.env.GEMINI_MODEL);
+    // Validate provider configuration
+    const provider = config.provider;
+
+    if (provider === 'gemini') {
+      if (!config.geminiApiKey) {
+        throw new Error('GEMINI_API_KEY is required when using gemini provider');
+      }
+      console.log(`✓ LLM Provider: Gemini (${config.geminiModel})`);
+    } else if (provider === 'groq') {
+      if (!config.groqApiKey) {
+        throw new Error('GROQ_API_KEY is required when using groq provider');
+      }
+      console.log(`✓ LLM Provider: Groq (${config.groqModel})`);
+    } else {
+      console.warn(`⚠️  Unknown provider: ${provider}, falling back to Gemini`);
+      (config as any).provider = 'gemini';
+      if (!config.geminiApiKey) {
+        throw new Error('GEMINI_API_KEY is required when using gemini provider (fallback)');
+      }
+      console.log(`✓ LLM Provider: Gemini (${config.geminiModel}) [fallback]`);
+    }
 
     // Validate admin authentication method
     const adminId = process.env.ADMIN_ID;
@@ -103,7 +127,6 @@ export async function validateConfig(): Promise<void> {
     (config as any).workingDir = resolvedDir;
 
     console.log('✓ Configuration validated successfully');
-    console.log(`✓ Gemini Model: ${config.geminiModel}`);
     console.log(`✓ Working directory: ${resolvedDir}`);
   } catch (error) {
     console.error('✗ Configuration validation failed:', error);

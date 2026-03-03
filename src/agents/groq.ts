@@ -1,15 +1,30 @@
 /**
- * Gemini Provider - LLM orchestrator using Google Gen AI SDK
- * Analyzes user intent and determines which tool to use
+ * Groq Provider - LLM orchestrator using Groq API
+ * Fast inference with various model options
  */
 
-import { GoogleGenAI } from '@google/genai';
+import Groq from 'groq-sdk';
 import type { ILLMProvider, ProviderResponse, ToolCall } from './base.js';
-import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 
-// System prompt for the orchestrator
-const SYSTEM_INSTRUCTION = `You are a Terminal Orchestrator. Your goal is to help a developer manage their machine via Telegram.
+export class GroqProvider implements ILLMProvider {
+  private client: Groq;
+  private model: string;
+
+  constructor(apiKey: string, model: string = 'llama-3.3-70b-versatile') {
+    this.client = new Groq({ apiKey });
+    this.model = model;
+    logger.debug(`Initialized Groq SDK with model: ${model}`);
+  }
+
+  /**
+   * Analyze user message and determine which tool to use
+   */
+  async analyzeUserMessage(userMessage: string): Promise<ProviderResponse> {
+    try {
+      logger.debug(`Analyzing message with Groq: ${userMessage}`);
+
+      const systemPrompt = `You are a Terminal Orchestrator. Your goal is to help a developer manage their machine via Telegram.
 
 Your capabilities:
 1. **execute_shell**: For lightweight, non-destructive commands like checking status (git, files, system). Examples:
@@ -64,25 +79,7 @@ For conversational response:
   "reasoning": "Your conversational response here"
 }`;
 
-export class GeminiProvider implements ILLMProvider {
-  private ai: GoogleGenAI;
-
-  constructor(apiKey: string, model: string = 'gemini-2.5-flash') {
-    this.ai = new GoogleGenAI({ apiKey });
-    this.model = model;
-    logger.debug(`Initialized Google Gen AI SDK with model: ${model}`);
-  }
-
-  private model: string;
-
-  /**
-   * Analyze user message and determine which tool to use
-   */
-  async analyzeUserMessage(userMessage: string): Promise<ProviderResponse> {
-    try {
-      logger.debug(`Analyzing message: ${userMessage}`);
-
-      const prompt = `User message: "${userMessage}"
+      const userPrompt = `User message: "${userMessage}"
 
 Analyze this request and determine the appropriate action. Consider:
 
@@ -108,60 +105,31 @@ IMPORTANT RULES:
 
 IMPORTANT: You must respond with a valid JSON object. Do not include any text before or after the JSON.
 
-Example format:
-{
-  "tool": "execute_shell",
-  "args": {"command": "git status"},
-  "reasoning": "User wants to check git status"
-}
-
-For propose_claude_action:
-{
-  "tool": "propose_claude_action",
-  "reasoning": "User explicitly mentioned claude"
-}
-
-Or for conversational response:
-{
-  "tool": null,
-  "reasoning": "Your response here"
-}
-
 Now analyze and respond with JSON only:`;
 
-      const result = await this.ai.models.generateContent({
-        model: config.geminiModel,
-        contents: prompt
+      const result = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 1024,
+        response_format: { type: 'json_object' }
       });
 
-      const text = result.text?.trim() || '';
-      logger.debug(`Raw Gemini response: ${text.substring(0, 200)}`);
-
-      // Try to extract JSON from the response
-      let jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/) ||
-                      text.match(/```\n?([\s\S]*?)\n?```/) ||
-                      text.match(/\{[\s\S]*\}/);
-
-      if (!jsonMatch) {
-        // No JSON found - treat as conversational response
-        logger.debug('No JSON found in response, treating as conversational');
-        return {
-          toolCall: null,
-          reasoning: text,
-        };
-      }
-
-      const jsonStr = jsonMatch[1] || jsonMatch[0];
+      const text = result.choices[0]?.message?.content?.trim() || '';
+      logger.debug(`Raw Groq response: ${text.substring(0, 200)}`);
 
       try {
-        const parsed = JSON.parse(jsonStr);
+        const parsed = JSON.parse(text);
         logger.debug(`Parsed JSON: tool=${parsed.tool}`);
 
         // Validate and create tool call with args from AI response
         if (parsed.tool && (parsed.tool === 'execute_shell' || parsed.tool === 'propose_claude_action')) {
           const toolCall: ToolCall = {
             name: parsed.tool,
-            args: parsed.args || {}, // Use args from AI response
+            args: parsed.args || {},
           };
 
           logger.debug(`Tool selected: ${toolCall.name}`);
@@ -186,18 +154,21 @@ Now analyze and respond with JSON only:`;
         };
       }
     } catch (error: any) {
-      logger.error('Error analyzing message:', error);
+      logger.error('Error analyzing message with Groq:', error);
 
       // Try to extract reasoning from error response
       try {
-        const result = await this.ai.models.generateContent({
-          model: config.geminiModel,
-          contents: `User message: "${userMessage}"\n\nProvide a helpful conversational response. Do not use any tools.`
+        const result = await this.client.chat.completions.create({
+          model: this.model,
+          messages: [
+            { role: 'user', content: `User message: "${userMessage}"\n\nProvide a helpful conversational response. Do not use any tools.` }
+          ],
+          max_tokens: 512
         });
 
         return {
           toolCall: null,
-          reasoning: result.text || 'Sorry, I encountered an error analyzing your request.',
+          reasoning: result.choices[0]?.message?.content || 'Sorry, I encountered an error analyzing your request.',
         };
       } catch (fallbackError) {
         logger.error('Fallback also failed:', fallbackError);
@@ -214,22 +185,18 @@ Now analyze and respond with JSON only:`;
    */
   async generateResponse(userMessage: string): Promise<string> {
     try {
-      const result = await this.ai.models.generateContent({
-        model: config.geminiModel,
-        contents: userMessage
+      const result = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: 'user', content: userMessage }
+        ],
+        max_tokens: 1024
       });
-      return result.text || 'Sorry, I could not generate a response.';
+
+      return result.choices[0]?.message?.content || 'Sorry, I could not generate a response.';
     } catch (error) {
-      logger.error('Error generating response:', error);
+      logger.error('Error generating response with Groq:', error);
       return 'Sorry, I encountered an error generating a response.';
     }
   }
 }
-
-// Export singleton instance
-export const geminiProvider = new GeminiProvider(config.geminiApiKey, config.geminiModel);
-
-/**
- * Backward compatibility alias
- */
-export const geminiAgent = geminiProvider;

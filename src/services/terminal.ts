@@ -88,24 +88,44 @@ export async function executeClaudeCommand(
 /**
  * Format shell result for Telegram display
  */
-export function formatTerminalResult(result: ShellResult, command: string): string {
+export function formatTerminalResult(result: ShellResult, command: string, useMarkdown: boolean = true): string {
   let output = '';
 
-  if (result.success) {
-    output += `✅ *Command executed successfully*\n`;
+  if (useMarkdown) {
+    if (result.success) {
+      output += `✅ *Command executed successfully*\n`;
+    } else {
+      output += `❌ *Command failed* (exit code: ${result.exitCode})\n`;
+    }
+
+    output += `🔹 *Command*: \`${command}\`\n`;
+    output += `⏱ *Duration*: ${result.duration}ms\n`;
+
+    if (result.stdout) {
+      output += `\n*Output*:\n\`\`\`bash\n${result.stdout}\n\`\`\`\n`;
+    }
+
+    if (result.stderr) {
+      output += `\n*Errors*:\n\`\`\`text\n${result.stderr}\n\`\`\`\n`;
+    }
   } else {
-    output += `❌ *Command failed* (exit code: ${result.exitCode})\n`;
-  }
+    // Plain text format (safer for complex output)
+    if (result.success) {
+      output += `✅ Command executed successfully\n`;
+    } else {
+      output += `❌ Command failed (exit code: ${result.exitCode})\n`;
+    }
 
-  output += `🔹 *Command*: \`${command}\`\n`;
-  output += `⏱ *Duration*: ${result.duration}ms\n`;
+    output += `🔹 Command: ${command}\n`;
+    output += `⏱ Duration: ${result.duration}ms\n`;
 
-  if (result.stdout) {
-    output += `\n*Output*:\n\`\`\`bash\n${result.stdout}\n\`\`\`\n`;
-  }
+    if (result.stdout) {
+      output += `\nOutput:\n${result.stdout}\n`;
+    }
 
-  if (result.stderr) {
-    output += `\n*Errors*:\n\`\`\`text\n${result.stderr}\n\`\`\`\n`;
+    if (result.stderr) {
+      output += `\nErrors:\n${result.stderr}\n`;
+    }
   }
 
   return output;
@@ -119,7 +139,7 @@ export async function executeAndFormatCommand(
   options: TerminalExecutionOptions = {}
 ): Promise<string> {
   const result = await executeTerminalCommand(command, options);
-  return formatTerminalResult(result, command);
+  return formatTerminalResult(result, command, true); // Use markdown for shell commands
 }
 
 /**
@@ -128,7 +148,12 @@ export async function executeAndFormatCommand(
 export async function executeAndFormatClaude(
   prompt: string,
   options: TerminalExecutionOptions = {}
-): Promise<string> {
+): Promise<{formatted: string; plainText: string}> {
   const result = await executeClaudeCommand(prompt, options);
-  return formatTerminalResult(result, `claude "${prompt}"`);
+  const command = `claude "${prompt}"`;
+
+  return {
+    formatted: formatTerminalResult(result, command, true), // Markdown version
+    plainText: formatTerminalResult(result, command, false), // Plain text version
+  };
 }

@@ -1,12 +1,13 @@
 # Telegram Terminal & Claude Code Agent
 
-A specialized Telegram Chatbot built with BunJS that acts as a remote terminal bridge and an AI orchestrator. It uses Gemini 2.5 Flash-Lite to analyze user intent, execute standard shell commands, and optimize prompts for Claude Code (CLI) with a mandatory manual approval gate.
+A specialized Telegram Chatbot built with BunJS that acts as a remote terminal bridge and an AI orchestrator. It uses LLM providers (Gemini or Groq) to analyze user intent, execute standard shell commands, and optimize prompts for Claude Code (CLI) with a mandatory manual approval gate.
 
 ## Features
 
 - **Remote Terminal**: Execute shell commands via Telegram (git, ls, pwd, etc.)
 - **Claude Code Integration**: Propose and execute complex coding tasks with approval workflow
-- **AI-Powered Intent Analysis**: Uses Gemini to determine whether to use shell or Claude
+- **AI-Powered Intent Analysis**: Uses Gemini or Groq to determine whether to use shell or Claude
+- **Multiple LLM Providers**: Switch between Gemini and Groq to avoid rate limits
 - **Manual Approval Gate**: All Claude Code actions require explicit confirmation
 - **Working Directory Restriction**: All commands execute in a configurable directory
 - **Admin Whitelist**: Only authorized users can interact with the bot
@@ -16,7 +17,7 @@ A specialized Telegram Chatbot built with BunJS that acts as a remote terminal b
 ## Tech Stack
 
 - **Runtime**: BunJS (v1.1+)
-- **LLM Provider**: Google Generative AI (Model: gemini-2.0-flash-exp-thinking-cache)
+- **LLM Providers**: Google Generative AI (Gemini) or Groq
 - **Telegram Framework**: Grammy (High-performance TypeScript framework)
 - **Shell Execution**: Bun Shell (Bun.$ and Bun.spawn)
 - **Language**: TypeScript (Strict mode)
@@ -28,7 +29,8 @@ A specialized Telegram Chatbot built with BunJS that acts as a remote terminal b
 - [Bun](https://bun.sh/) v1.1 or higher
 - [Claude Code CLI](https://claude.ai/code) installed and accessible via `claude` command
 - A Telegram Bot Token (get from [@BotFather](https://t.me/botfather))
-- A Google AI API Key (get from [Google AI Studio](https://makersuite.google.com/app/apikey))
+- A Google AI API Key (get from [Google AI Studio](https://makersuite.google.com/app/apikey)) OR
+- A Groq API Key (get from [Groq Console](https://console.groq.com/keys))
 
 ### Setup
 
@@ -49,11 +51,28 @@ A specialized Telegram Chatbot built with BunJS that acts as a remote terminal b
 
    Edit `.env` and fill in the required values:
    ```env
+   # Required
    TELEGRAM_TOKEN=your_telegram_bot_token_here
+
+   # Choose your LLM provider: gemini or groq
+   PROVIDER=groq
+
+   # For Gemini (required if PROVIDER=gemini)
    GEMINI_API_KEY=your_gemini_api_key_here
+   GEMINI_MODEL=gemini-2.5-flash
+
+   # For Groq (required if PROVIDER=groq)
+   GROQ_API_KEY=your_groq_api_key_here
+   GROQ_MODEL=llama-3.3-70b-versatile
+
+   # Security
    ADMIN_ID=your_telegram_user_id_here
-   CLAUDE_CLI_PATH=claude  # Optional, default is 'claude'
-   WORKING_DIR=/path/to/your/project  # Optional, defaults to current directory
+   # OR use username (easier, no @ symbol)
+   ADMIN_USERNAME=your_telegram_username
+
+   # Optional
+   CLAUDE_CLI_PATH=claude
+   WORKING_DIR=/path/to/your/project
    ```
 
    **Important**: Set `WORKING_DIR` to restrict all commands to a specific directory. All shell and Claude commands will be executed in this directory.
@@ -61,7 +80,7 @@ A specialized Telegram Chatbot built with BunJS that acts as a remote terminal b
 4. **Get your Telegram User ID**
    - Message [@userinfobot](https://t.me/userinfobot) on Telegram
    - It will reply with your user ID
-   - Add this ID to `ADMIN_ID` in `.env`
+   - Add this ID to `ADMIN_ID` in `.env` (or use `ADMIN_USERNAME` for easier setup)
 
 ## Usage
 
@@ -207,9 +226,12 @@ Bot: /home/user/projects/my-telegram-chatbot
 ```
 src/
 ├── index.ts           # Main entry, Telegram bot setup
-├── config.ts          # Env validation
+├── config.ts          # Env validation & provider configuration
 ├── agents/
-│   └── gemini.ts      # LLM logic & Tool configuration
+│   ├── base.ts        # Provider interface & types
+│   ├── gemini.ts      # Gemini provider implementation
+│   ├── groq.ts        # Groq provider implementation
+│   └── factory.ts     # Provider factory
 ├── tools/
 │   ├── shell.ts       # Bun.$ shell wrappers
 │   └── claude.ts      # Claude CLI execution
@@ -222,6 +244,19 @@ src/
 └── types/
     └── index.ts       # TypeScript definitions
 ```
+
+## LLM Provider Comparison
+
+| Feature | Gemini | Groq |
+|---------|--------|------|
+| **Speed** | Fast | Very Fast |
+| **Rate Limits** | Moderate | Generous |
+| **Cost** | Free tier available | Free tier available |
+| **Models** | gemini-2.5-flash, gemini-1.5-pro | llama-3.3-70b, mixtral-8x7b |
+| **JSON Mode** | Manual parsing | Native support |
+| **Best For** | Complex reasoning | Fast responses, high volume |
+
+**Recommendation**: Start with Groq for faster responses and higher rate limits. Switch to Gemini if you need more advanced reasoning capabilities.
 
 ## Security
 
@@ -260,6 +295,36 @@ src/
 - Verify `GEMINI_API_KEY` is valid
 - Check API quota in Google Cloud Console
 - Ensure the model name is correct
+- Try switching to Groq provider if you hit rate limits
+
+### Groq API errors
+- Verify `GROQ_API_KEY` is valid
+- Check your quota at [Groq Console](https://console.groq.com/)
+- Ensure the model name is correct (e.g., `llama-3.3-70b-versatile`)
+- Try switching to Gemini provider if you hit rate limits
+
+### Switching Between Providers
+
+If you encounter rate limits with one provider, you can easily switch:
+
+1. **Using Gemini (default)**
+   ```env
+   PROVIDER=gemini
+   GEMINI_API_KEY=your_key
+   GEMINI_MODEL=gemini-2.5-flash
+   ```
+
+2. **Using Groq (faster, often higher rate limits)**
+   ```env
+   PROVIDER=groq
+   GROQ_API_KEY=your_key
+   GROQ_MODEL=llama-3.3-70b-versatile
+   ```
+
+3. **Recommended Groq Models:**
+   - `llama-3.3-70b-versatile` - Best balance of speed and capability
+   - `llama-3.1-70b-versatile` - Slightly older but still excellent
+   - `mixtral-8x7b-32768` - Good for complex reasoning
 
 ## Project Structure
 

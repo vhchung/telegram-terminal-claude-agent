@@ -20,7 +20,6 @@ module.exports = {
       max_memory_restart: '500M',
       env: {
           NODE_ENV: 'production',
-          GEMINI_MODEL: 'gemini-2.5-flash-lite'
       },
       env_development: {
         NODE_ENV: 'development',

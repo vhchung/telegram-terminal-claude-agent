@@ -5,7 +5,7 @@
 import 'dotenv/config';
 import { Bot, InlineKeyboard } from 'grammy';
 import { config, validateConfig } from './config.js';
-import { geminiAgent } from './agents/gemini.js';
+import { createProvider } from './agents/factory.js';
 import { sessionManager } from './services/session.js';
 import {
   executeAndFormatCommand,
@@ -20,6 +20,13 @@ import {
   formatWarning,
 } from './utils/formatter.js';
 import { logger } from './utils/logger.js';
+
+// Initialize the LLM provider based on configuration
+const llmProvider = createProvider(
+  config.provider,
+  config.provider === 'gemini' ? config.geminiApiKey : config.groqApiKey,
+  config.provider === 'gemini' ? config.geminiModel : config.groqModel
+);
 
 // Initialize the bot
 const bot = new Bot(config.telegramToken);
@@ -47,8 +54,8 @@ async function executeClaudeInTerminalMode(
   ctx: any
 ): Promise<{ response: string; needsAnswer: boolean }> {
   try {
-    // Execute Claude with the prompt
-    const result = await executeAndFormatClaude(prompt);
+    // Execute Claude with the prompt - get plain text for parsing
+    const { plainText: result } = await executeAndFormatClaude(prompt);
 
     // Parse the output for AskUserQuestion tool calls
     // Claude's output will contain the tool call in a specific format
@@ -288,12 +295,20 @@ bot.on('message:text', async (ctx) => {
 
       sessionManager.setCurrentProcess(chatId, 'claude');
 
-      const result = await executeAndFormatClaude(fullPrompt);
+      // Execute Claude and check for AskUserQuestion in the response
+      const claudeResult = await executeClaudeInTerminalMode(fullPrompt, chatId, ctx);
 
       sessionManager.clearCurrentProcess(chatId);
-      sessionManager.addToConversationHistory(chatId, `Claude: ${result}`);
 
-      await ctx.reply(result, { parse_mode: 'MarkdownV2' });
+      if (claudeResult.needsAnswer) {
+        // Claude asked another question - buttons were already sent, session stays active
+        return;
+      }
+
+      // No new question, add response to history and send it
+      sessionManager.addToConversationHistory(chatId, `Claude: ${claudeResult.response}`);
+
+      await ctx.reply(claudeResult.response); // No parse_mode to avoid Markdown escaping issues
 
       return;
     }
@@ -332,7 +347,7 @@ bot.on('message:text', async (ctx) => {
       // Add Claude's response to history
       sessionManager.addToConversationHistory(chatId, `Claude: ${result.response}`);
 
-      await ctx.reply(result.response, { parse_mode: 'MarkdownV2' });
+      await ctx.reply(result.response); // No parse_mode to avoid Markdown escaping issues
     } catch (error) {
       logger.error(`[${chatId}] Error in terminal session:`, error);
       sessionManager.clearCurrentProcess(chatId);
@@ -368,8 +383,8 @@ bot.on('message:text', async (ctx) => {
   const processingMsg = await ctx.reply(formatInfo('⏳ Analyzing your request...'));
 
   try {
-    // Analyze the message using Gemini
-    const { toolCall, reasoning } = await geminiAgent.analyzeUserMessage(userMessage);
+    // Analyze the message using the configured LLM provider
+    const { toolCall, reasoning } = await llmProvider.analyzeUserMessage(userMessage);
 
     if (!toolCall) {
       // No tool selected - return conversational response
@@ -543,13 +558,13 @@ bot.on('callback_query:data', async (ctx) => {
         sessionManager.clearPendingClaudeAction(chatId);
 
         // Execute Claude
-        const result = await executeAndFormatClaude(pendingAction.optimizedPrompt);
+        const { plainText: result } = await executeAndFormatClaude(pendingAction.optimizedPrompt);
 
         // Clear process
         sessionManager.clearCurrentProcess(chatId);
 
-        // Send result
-        await ctx.api.sendMessage(chatId, result, { parse_mode: 'MarkdownV2' });
+        // Send result (without parse_mode to avoid Markdown escaping issues)
+        await ctx.api.sendMessage(chatId, result);
         break;
       }
 
@@ -672,10 +687,8 @@ bot.on('callback_query:data', async (ctx) => {
           // Add Claude's response to history
           sessionManager.addToConversationHistory(chatId, `Claude: ${result.response}`);
 
-          // Send the response
-          await ctx.api.sendMessage(chatId, result.response, {
-            parse_mode: 'MarkdownV2',
-          });
+          // Send the response (no parse_mode to avoid Markdown escaping issues)
+          await ctx.api.sendMessage(chatId, result.response);
 
           break;
         }
